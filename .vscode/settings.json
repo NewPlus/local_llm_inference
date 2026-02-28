@@ -1,0 +1,6 @@
+{
+    "python.defaultInterpreterPath": "/opt/anaconda3/envs/local-llm-inference/bin/python",
+    "python.condaPath": "/opt/anaconda3/bin/conda",
+    "python-envs.defaultEnvManager": "ms-python.python:conda",
+    "python-envs.defaultPackageManager": "ms-python.python:conda"
+}
