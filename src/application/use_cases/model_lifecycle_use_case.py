@@ -72,6 +72,15 @@ class ModelLifecycleUseCase:
             payload=response.payload if response.ok else {"error": response.error},
         )
 
+    def unload_all(self, engine: EngineType | None = None) -> list[ModelOperationResultDTO]:
+        """활성 모델 전체를 언로드한다.
+
+        Args:
+            engine: 지정 시 해당 엔진 모델만 언로드한다.
+        """
+        models = self.settings.enabled_models(engine=engine)
+        return [self.unload(model.id) for model in models]
+
     def apply(self) -> list[ModelOperationResultDTO]:
         """설정 동기화 정책을 적용한다.
 

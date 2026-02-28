@@ -52,6 +52,7 @@ class InferenceUseCase:
             top_p=kwargs.get("top_p", model.parameters.top_p),
             num_ctx=kwargs.get("num_ctx", model.parameters.num_ctx),
             max_tokens=kwargs.get("max_tokens"),
+            timeout=kwargs.get("timeout"),
         )
 
         return InferenceResultDTO(

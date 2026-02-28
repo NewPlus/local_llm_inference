@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import importlib.util
+import os
+import socket
 import subprocess
+import time
 from dataclasses import dataclass
 
 from ..config.settings import AppSettings, EngineType, ModelConfig
@@ -58,36 +62,83 @@ class ProcessManager:
             host,
             "--port",
             str(port),
+            "--trust-remote-code",
         ]
+
+    def _has_vllm_module(self) -> bool:
+        """현재 Python 환경에 vLLM 모듈이 설치되어 있는지 확인한다."""
+        return importlib.util.find_spec("vllm") is not None
+
+    def _is_port_open(self, host: str, port: int) -> bool:
+        """지정 host/port 에 리스닝 중인 프로세스가 있는지 확인한다."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.3)
+            return sock.connect_ex((host, port)) == 0
 
     def start_engines(self, selected_engines: list[EngineType] | None = None) -> dict[EngineType, EngineProcessInfo]:
         """엔진 프로세스를 시작하고 PID/포트 정보를 반환한다."""
         active_engines = self.resolve_engines(selected_engines)
         started: dict[EngineType, EngineProcessInfo] = {}
+        failures: list[str] = []
 
         for engine in active_engines:
             endpoint = self.settings.runtime.endpoints[engine]
 
-            if engine == "ollama":
-                command = self._build_ollama_command()
-            else:
-                model = self._first_enabled_model("vllm")
-                if model is None:
-                    raise RuntimeError("vLLM 기동을 위한 활성 모델이 없습니다.")
-                command = self._build_vllm_command(
-                    model_name=model.model_name(),
+            if self._is_port_open(endpoint.host, endpoint.port):
+                started[engine] = EngineProcessInfo(
+                    engine=engine,
                     host=endpoint.host,
                     port=endpoint.port,
+                    pid=0,
                 )
+                print(
+                    f"[INFO] {engine} 엔진은 이미 실행 중으로 판단되어 재기동을 건너뜁니다. "
+                    f"({endpoint.host}:{endpoint.port})"
+                )
+                continue
 
-            process = subprocess.Popen(command, text=True)
-            self._processes[engine] = process
-            started[engine] = EngineProcessInfo(
-                engine=engine,
-                host=endpoint.host,
-                port=endpoint.port,
-                pid=process.pid,
-            )
+            try:
+                if engine == "ollama":
+                    command = self._build_ollama_command()
+                    env = os.environ.copy()
+                    env["OLLAMA_HOST"] = f"{endpoint.host}:{endpoint.port}"
+                    process = subprocess.Popen(command, text=True, env=env)
+                else:
+                    if not self._has_vllm_module():
+                        raise RuntimeError("vllm 패키지가 설치되어 있지 않습니다.")
+                    model = self._first_enabled_model("vllm")
+                    if model is None:
+                        raise RuntimeError("vLLM 기동을 위한 활성 모델이 없습니다.")
+                    command = self._build_vllm_command(
+                        model_name=model.model_name(),
+                        host=endpoint.host,
+                        port=endpoint.port,
+                    )
+                    process = subprocess.Popen(command, text=True)
+
+                time.sleep(0.4)
+                return_code = process.poll()
+                if return_code is not None:
+                    raise RuntimeError(f"프로세스가 즉시 종료되었습니다. exit_code={return_code}")
+
+                self._processes[engine] = process
+                started[engine] = EngineProcessInfo(
+                    engine=engine,
+                    host=endpoint.host,
+                    port=endpoint.port,
+                    pid=process.pid,
+                )
+            except Exception as exc:
+                failures.append(f"{engine} 기동 실패: {exc}")
+
+        if not started:
+            details = " | ".join(failures) if failures else "알 수 없는 오류"
+            raise RuntimeError(f"엔진 기동에 실패했습니다. {details}")
+
+        if failures:
+            print("[WARN] 일부 엔진 기동에 실패했습니다.")
+            for failure in failures:
+                print(f"- {failure}")
 
         return started
 

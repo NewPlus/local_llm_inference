@@ -16,7 +16,13 @@ class OllamaAdapter(EngineAdapter):
         """어댑터 엔진 식별자 값을 반환한다."""
         return "ollama"
 
-    def _request(self, path: str, method: str = "GET", payload: dict[str, Any] | None = None) -> AdapterResponse:
+    def _request(
+        self,
+        path: str,
+        method: str = "GET",
+        payload: dict[str, Any] | None = None,
+        timeout: int = 30,
+    ) -> AdapterResponse:
         """Ollama API로 HTTP 요청을 보내고 표준 응답으로 변환한다."""
         url = f"{self.base_url}{path}"
         data = None
@@ -28,7 +34,7 @@ class OllamaAdapter(EngineAdapter):
         request = Request(url=url, data=data, headers=headers, method=method)
 
         try:
-            with urlopen(request, timeout=10) as response:
+            with urlopen(request, timeout=timeout) as response:
                 body = response.read().decode("utf-8")
                 if body:
                     return AdapterResponse(ok=True, payload=json.loads(body))
@@ -70,6 +76,8 @@ class OllamaAdapter(EngineAdapter):
 
     def generate(self, model_name: str, prompt: str, **kwargs: Any) -> AdapterResponse:
         """Ollama `/api/generate` 엔드포인트로 비스트리밍 추론을 실행한다."""
+        max_tokens = kwargs.get("max_tokens")
+        timeout = int(kwargs.get("timeout") or 300)
         payload = {
             "model": model_name,
             "prompt": prompt,
@@ -78,6 +86,7 @@ class OllamaAdapter(EngineAdapter):
                 "temperature": kwargs.get("temperature"),
                 "top_p": kwargs.get("top_p"),
                 "num_ctx": kwargs.get("num_ctx"),
+                "num_predict": max_tokens,
             },
         }
-        return self._request("/api/generate", method="POST", payload=payload)
+        return self._request("/api/generate", method="POST", payload=payload, timeout=timeout)
